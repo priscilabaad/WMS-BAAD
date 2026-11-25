@@ -12978,6 +12978,28 @@ function vRec(v){
       c.append(h('div',{class:'muted',style:'margin-bottom:8px'},'Este material ainda não tem endereço no SAP'+(cd0?' no depósito '+cd0:'')+'. Leia o QR do endereço onde guardou.'));
     }
   }
+  if(R.mat&&!e){
+    var cd1=curDep();
+    var sl1=Object.keys(S.sap).map(function(k){return S.sap[k];}).filter(function(x){return key(x.mat)===mid&&x.dep;});
+    var dps=depList();
+    var dSel=h('select',{style:'max-width:130px'});
+    dps.forEach(function(d){dSel.append(h('option',{value:d},'Dep. '+d));});
+    dSel.value=cd1||(sl1.length?sl1[0].dep:'')||dps[0]||'';
+    var cIn=h('input',{type:'text',placeholder:'Digite o endereço (ex.: A-05-03)',autocapitalize:'characters',autocomplete:'off'});
+    async function usar(){
+      var cod=stdEnd(cIn.value);
+      if(!cod){toast('Digite o endereço.','bad');return;}
+      if(cod.length>MAX_END){toast('No SAP o endereço aceita no máximo '+MAX_END+' caracteres.','bad');return;}
+      var dp=dSel.value||'',id=endKey(dp,cod);
+      if(!S.end[id]){
+        try{await put('end',id,{codigo:cod,desc:'',dep:dp});}catch(err){toast(errMsg(err),'bad');return;}
+      }
+      R.end=id;go('rec');
+    }
+    cIn.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();usar();}});
+    c.append(h('div',{class:'muted',style:'margin:4px 0 4px'},'Endereço novo (digitando):'));
+    c.append(h('div',{class:'row',style:'margin-bottom:10px'},dps.length?dSel:null,h('div',{class:'grow'},cIn),h('button',{class:'btn',onclick:usar},'Usar')));
+  }
   c.append(slot('end','Endereço (onde guardou)',e?endName(e):'',e?(e.desc||''):'',function(){R.end='';go('rec');}));
   if(R.mat&&!e){
     var st=stockOfMat(mid);
