@@ -40,6 +40,7 @@ label.f{display:block;font-size:12px;color:var(--mut);margin:0 0 4px}
 .btn.ghost{background:transparent}
 .btn[disabled]{opacity:.5;cursor:not-allowed}
 .hidden{display:none!important}
+input[type=date]{min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;min-height:46px}
 #depSel{width:auto;max-width:150px;padding:4px 8px;font-size:12px;border-radius:99px;background:var(--card)}
 .slot{border:1.5px dashed var(--line);border-radius:var(--r);padding:12px;margin-bottom:10px;display:flex;gap:10px;align-items:center}
 .slot.full{border-style:solid;border-color:var(--acc);background:var(--soft)}
@@ -12813,7 +12814,11 @@ function refresh(){
 }
 document.addEventListener('focusout',function(){if(focusPending){focusPending=false;setTimeout(function(){var a=document.activeElement;if(!(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)))go(tab);},150);}});
 
-var TABS=[['rec','📦','Receber'],['mov','🔄','Endereço'],['con','🔎','Consultar'],['cad','🗂️','Cadastros'],['his','🕘','Histórico']];
+var hashFlag=String(location.hash||'');
+if(/completo/.test(hashFlag))lsSet('miniwms_full','1');
+if(/simples/.test(hashFlag))lsSet('miniwms_full','0');
+var FULL=lsGet('miniwms_full')==='1';
+var TABS=FULL?[['rec','📦','Receber'],['mov','🔄','Endereço'],['con','🔎','Estoque'],['cad','🗂️','Cadastros'],['his','🕘','Histórico']]:[['rec','📦','Receber'],['con','🔎','Estoque']];
 function drawTabs(){
   var n=document.getElementById('tabs');n.textContent='';
   TABS.forEach(function(t){n.append(h('button',{class:tab===t[0]?'on':'',onclick:function(){go(t[0]);window.scrollTo(0,0);}},h('i',null,t[1]),t[2]));});
@@ -12898,7 +12903,14 @@ async function saveFile(filename,data){
 
 /* ---------- RECEBER (recebimento + guardar no mesmo fluxo) ---------- */
 function today(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
-function brDate(iso){var p=String(iso||'').split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:(iso||'');}
+function normData(x){
+  x=String(x==null?'':x).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(x))return x;
+  var d=new Date(x);
+  if(isNaN(d.getTime()))return '';
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function brDate(iso){var n=normData(iso),p=n.split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:String(iso||'');}
 function parseEtiqueta(raw){
   raw=String(raw||'').trim();
   var out={mat:'',qtd:'',nota:'',por:''},hasKey=false;
@@ -12953,6 +12965,19 @@ function vRec(v){
     h('div',{class:'row',style:'margin-top:8px'},field('Recebido por','por'),field('Data do recebimento','data',{type:'date'})),
     h('div',{style:'height:12px'}));
   var e=S.end[R.end];
+  if(R.mat&&!e){
+    var cd0=curDep();
+    var sl0=Object.keys(S.sap).map(function(k){return S.sap[k];}).filter(function(x){return key(x.mat)===mid&&x.end&&(!cd0||String(x.dep||'')===cd0);});
+    if(sl0.length){
+      c.append(h('div',{class:'muted',style:'margin-bottom:6px'},'Endereço deste material no SAP:'));
+      sl0.forEach(function(x){
+        c.append(h('button',{class:'btn primary big',style:'margin-bottom:8px',disabled:F.busy,onclick:function(){guardarEm(x);}},'✔ Guardar em '+(x.dep?x.dep+' · ':'')+x.end));
+      });
+      c.append(h('div',{class:'muted',style:'margin:2px 0 8px'},'Ou leia o QR de outro endereço:'));
+    }else{
+      c.append(h('div',{class:'muted',style:'margin-bottom:8px'},'Este material ainda não tem endereço no SAP'+(cd0?' no depósito '+cd0:'')+'. Leia o QR do endereço onde guardou.'));
+    }
+  }
   c.append(slot('end','Endereço (onde guardou)',e?endName(e):'',e?(e.desc||''):'',function(){R.end='';go('rec');}));
   if(R.mat&&!e){
     var st=stockOfMat(mid);
@@ -12969,8 +12994,17 @@ function vRec(v){
   if(!pl.length)pc.append(h('div',{class:'muted'},'Nada pendente. Tudo que chegou já foi guardado.'));
   else pc.append(h('div',{class:'list'},pl.slice(0,40).map(function(x){var r=x.r;
     return h('div',null,h('div',{class:'m'},h('b',null,r.mat),h('small',null,fmt(r.qtd)+' · '+(r.nota?'NF '+r.nota+' · ':'')+'recebido por '+(r.por||'?')+' · '+brDate(r.data)+(r.desc?' · '+r.desc:''))),
-      h('button',{class:'btn sm primary',onclick:function(){F.rec={mat:r.mat,qtd:String(r.qtd).replace('.',','),nota:r.nota||'',por:r.por||'',data:r.data||today(),end:'',pendId:x.id};F.recRaw='';go('rec');window.scrollTo(0,0);}},'Guardar'));})));
+      h('button',{class:'btn sm primary',onclick:function(){F.rec={mat:r.mat,qtd:String(r.qtd).replace('.',','),nota:r.nota||'',por:r.por||'',data:normData(r.data)||today(),end:'',pendId:x.id};F.recRaw='';go('rec');window.scrollTo(0,0);}},'Guardar'));})));
   v.append(pc);
+}
+async function guardarEm(x){
+  var id=endKey(x.dep||'',x.end);
+  if(!S.end[id]){
+    try{await put('end',id,{codigo:x.end,desc:'',dep:x.dep||''});}
+    catch(err){toast(errMsg(err),'bad');return;}
+  }
+  F.rec.end=id;
+  await salvarRec(true);
 }
 async function salvarRec(guardar){
   var R=F.rec,code=R.mat.trim(),q=num(R.qtd);
@@ -12986,7 +13020,7 @@ async function salvarRec(guardar){
     var mid=key(code),m=S.mat[mid];
     if(!m){m={codigo:code,desc:'',un:'UN'};await put('mat',mid,m);}
     var old=R.pendId&&S.rec[R.pendId];
-    var rec=Object.assign({ts:Date.now(),status:'PENDENTE',end:'',guardadoPor:'',guardadoTs:0},old||{},{data:R.data,mes:R.data.slice(0,7),mat:m.codigo,desc:m.desc||'',qtd:q,nota:R.nota.trim(),por:R.por.trim()||user});
+    var rec=Object.assign({ts:Date.now(),status:'PENDENTE',end:'',guardadoPor:'',guardadoTs:0},old||{},{data:normData(R.data),mes:normData(R.data).slice(0,7),mat:m.codigo,desc:m.desc||'',qtd:q,nota:R.nota.trim(),por:R.por.trim()||user});
     if(guardar){
       var e=S.end[endId],novo=await changeStock(endId,mid,'in',q);
       await registrarEnderecoSap(m.codigo,e);
@@ -13014,7 +13048,7 @@ function vHisRec(v){
   v.append(h('div',{class:'card'},box));
   function cur(){
     var f=F.hq.trim().toLowerCase();
-    return Object.keys(S.rec).map(function(id){return S.rec[id];}).filter(function(r){return (r.mes||'')===F.hm&&(!f||[r.mat,r.desc,r.nota,r.por,r.end,r.guardadoPor].join(' ').toLowerCase().indexOf(f)>=0);}).sort(function(a,b){return String(b.data).localeCompare(String(a.data))||b.ts-a.ts;});
+    return Object.keys(S.rec).map(function(id){return S.rec[id];}).filter(function(r){return normData(r.data).slice(0,7)===F.hm&&(!f||[r.mat,r.desc,r.nota,r.por,r.end,r.guardadoPor].join(' ').toLowerCase().indexOf(f)>=0);}).sort(function(a,b){return normData(b.data).localeCompare(normData(a.data))||b.ts-a.ts;});
   }
   function draw(){
     var arr=cur();box.textContent='';act.textContent='';
@@ -13136,12 +13170,12 @@ function vCon(v){
   v.append(h('div',{class:'card'},scanBar(onConCode,'ou digite / bipe o código'),h('div',{style:'margin-top:8px'},qi)));
   var res=h('div');v.append(res);
   function selMat(code){F.selType='mat';F.selId=key(code);drawRes();lookupMat(code,true).then(drawRes);}
-  v.append(h('button',{class:'btn',onclick:function(){
+  v.append(h('button',{class:'btn'+(FULL?'':' hidden'),onclick:function(){
     var rows=[['Depósito','Endereço','Descrição endereço','Material','Descrição material','Unidade','Quantidade']];
     Object.keys(S.est).map(function(k){return S.est[k];}).filter(function(s){return s.qtd>0;}).sort(function(a,b){return String(a.end).localeCompare(String(b.end),'pt-BR',{numeric:true});}).forEach(function(s){var m=S.mat[s.mat]||{},e=S.end[s.end]||{};rows.push([e.dep||'',e.codigo||s.end,e.desc||'',m.codigo||s.mat,m.desc||'',m.un||'',String(s.qtd).replace('.',',')]);});
     saveFile('estoque_'+new Date().toISOString().slice(0,10)+'.csv',csv(rows));
   }},'⬇️ Baixar estoque (CSV p/ Excel)'));
-  v.append(h('button',{class:'btn',style:'margin-top:8px',onclick:function(){
+  v.append(h('button',{class:'btn'+(FULL?'':' hidden'),style:'margin-top:8px',onclick:function(){
     if(modo==='sheet'){
       fetch(ST+(ST.indexOf('?')>=0?'&':'?')+'action=sap&key='+encodeURIComponent(sheetKey()),{redirect:'follow'}).then(function(r){return r.text();}).then(function(t){
         var L=t.replace(/\r/g,'').split('\n').slice(1).filter(Boolean),R=[['Material','Depósito','Endereço','Situação no SAP']];
