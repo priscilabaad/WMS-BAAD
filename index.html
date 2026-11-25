@@ -12757,28 +12757,49 @@ async function decodeFile(file){
 async function liveScan(onText,onFail){
   if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){onFail();return;}
   var stream;
-  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});}
-  catch(e){onFail();return;}
-  var stop=false;
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});}
+  catch(e){
+    try{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});}
+    catch(e2){onFail(e2&&e2.name);return;}
+  }
+  var stop=false,track=stream.getVideoTracks()[0],torchOn=false;
+  try{var pf=track.applyConstraints({advanced:[{focusMode:'continuous'}]});if(pf&&pf.catch)pf.catch(function(){});}catch(e){}
+  var det=null;
+  try{if('BarcodeDetector' in window)det=new BarcodeDetector({formats:['qr_code']});}catch(e){det=null;}
   var video=h('video',{playsinline:true,autoplay:true,muted:true,style:'width:100%;max-height:62vh;background:#000;border-radius:12px'});
   video.muted=true;video.srcObject=stream;
   function close(){stop=true;try{stream.getTracks().forEach(function(t){t.stop();});}catch(e){}ov.remove();}
-  var ov=h('div',{style:'position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,.88);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;gap:12px'},
-    video,h('div',{style:'color:#fff;font-size:15px'},'Aponte para o QR Code'),h('button',{class:'btn',onclick:close},'Cancelar'));
+  var caps={};try{caps=track.getCapabilities?track.getCapabilities():{};}catch(e){}
+  var torchBtn=caps.torch?h('button',{class:'btn',onclick:async function(){
+    torchOn=!torchOn;try{await track.applyConstraints({advanced:[{torch:torchOn}]});}catch(e){torchOn=false;}
+  }},'🔦 Lanterna'):null;
+  var ov=h('div',{style:'position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,.9);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;gap:12px'},
+    video,
+    h('div',{style:'color:#fff;font-size:15px;text-align:center'},'Aponte para o QR Code e aproxime até ele ocupar boa parte da tela'),
+    h('div',{class:'row',style:'justify-content:center'},torchBtn,h('button',{class:'btn',onclick:close},'Cancelar')));
   document.body.append(ov);
   video.play().catch(function(){});
-  var cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true});
-  (function loop(){
+  var cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true}),n=0,usarJs=!det;
+  function achou(t){close();onText(t);}
+  async function passo(){
     if(stop)return;
     if(video.readyState>=2&&video.videoWidth){
-      var sc=Math.min(1,720/video.videoWidth);cv.width=Math.round(video.videoWidth*sc);cv.height=Math.round(video.videoHeight*sc);
-      cx.drawImage(video,0,0,cv.width,cv.height);
-      var d=cx.getImageData(0,0,cv.width,cv.height);
-      var r=jsQR(d.data,cv.width,cv.height,{inversionAttempts:'dontInvert'});
-      if(r&&r.data){close();onText(r.data);return;}
+      n++;
+      if(det&&!usarJs){
+        try{var r=await det.detect(video);if(r&&r.length&&r[0].rawValue){achou(r[0].rawValue);return;}}
+        catch(e){usarJs=true;}
+      }
+      if(usarJs){
+        var sc=Math.min(1,1000/video.videoWidth);cv.width=Math.round(video.videoWidth*sc);cv.height=Math.round(video.videoHeight*sc);
+        cx.drawImage(video,0,0,cv.width,cv.height);
+        var d=cx.getImageData(0,0,cv.width,cv.height);
+        var j=jsQR(d.data,cv.width,cv.height,{inversionAttempts:(n%4===0?'attemptBoth':'dontInvert')});
+        if(j&&j.data){achou(j.data);return;}
+      }
     }
-    setTimeout(loop,120);
-  })();
+    setTimeout(passo,usarJs?150:120);
+  }
+  passo();
 }
 
 /* Barra de leitura: câmera ao vivo, foto do QR, ou digitar / bipar com leitor */
@@ -12794,7 +12815,7 @@ function scanBar(onCode,placeholder){
     catch(e){toast('Não consegui ler a foto.','bad');}
   });
   var live=h('button',{class:'btn primary',onclick:function(){
-    liveScan(onCode,function(){toast('Câmera ao vivo indisponível aqui. Use o botão 🖼️ para tirar uma foto do QR.','bad');});
+    liveScan(onCode,function(nome){toast(nome==='NotAllowedError'?'A câmera está bloqueada. Toque no cadeado ao lado do endereço do site e permita a câmera. Ou use o botão 🖼️ para tirar uma foto do QR.':'Câmera ao vivo indisponível. Use o botão 🖼️ para tirar uma foto do QR.','bad');});
   }},'📷 Ler QR');
   var photo=h('label',{class:'btn',title:'Tirar foto do QR'},'🖼️',file);
   return h('div',{class:'row'},live,photo,h('div',{class:'grow'},inp),h('button',{class:'btn',onclick:go1},'OK'));
