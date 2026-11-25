@@ -12823,7 +12823,7 @@ function scanBar(onCode,placeholder){
 
 /* ---------- estado das telas ---------- */
 var tab='rec';
-var F={fDep:'',rec:{mat:'',qtd:'',nota:'',por:'',data:'',end:'',pendId:''},recRaw:'',hisMode:'mov',hm:'',mode:'in',mat:'',end:'',qtd:'',unknown:null,askName:false,busy:false,
+var F={fDep:'',rec:{mat:'',qtd:'',nota:'',por:'',data:'',end:'',pendId:''},fix:null,recRaw:'',hisMode:'mov',hm:'',mode:'in',mat:'',end:'',qtd:'',unknown:null,askName:false,busy:false,
        q:'',selType:'',selId:'',
        cad:'mat',editId:'',fCode:'',fDesc:'',fUn:'',paste:'',
        lab:'mat',labQ:'',hq:''};
@@ -12975,6 +12975,7 @@ function vRec(v){
     if(onchg)i.addEventListener('change',onchg);
     return h('div',{class:'grow'},h('label',{class:'f'},label),i);
   }
+  if(F.fix){var cf=cardFix();if(cf){v.append(cf);return;}}
   var mid=key(R.mat),mm=S.mat[mid];
   var c=h('div',{class:'card'},h('h2',null,pend?'Guardar material recebido':'Receber material'),
     scanBar(onRecCode,'ou digite / bipe a etiqueta'),
@@ -13039,6 +13040,13 @@ function vRec(v){
     return h('div',null,h('div',{class:'m'},h('b',null,r.mat),h('small',null,fmt(r.qtd)+' · '+(r.nota?'NF '+r.nota+' · ':'')+'recebido por '+(r.por||'?')+' · '+brDate(r.data)+(r.desc?' · '+r.desc:''))),
       h('button',{class:'btn sm primary',onclick:function(){F.rec={mat:r.mat,qtd:String(r.qtd).replace('.',','),nota:r.nota||'',por:r.por||'',data:normData(r.data)||today(),end:'',pendId:x.id};F.recRaw='';go('rec');window.scrollTo(0,0);}},'Guardar'));})));
   v.append(pc);
+  var rl=Object.keys(S.rec).map(function(id){return {id:id,r:S.rec[id]};}).sort(function(a,b){return (b.r.ts||0)-(a.r.ts||0);}).slice(0,12);
+  var rc=h('div',{class:'card'},h('h2',null,'Últimos recebimentos'));
+  if(!rl.length)rc.append(h('div',{class:'muted'},'Nenhum recebimento ainda.'));
+  else rc.append(h('div',{class:'list'},rl.map(function(x){var r=x.r;
+    return h('div',null,h('div',{class:'m'},h('b',null,r.mat),h('small',null,fmt(r.qtd)+' · '+brDate(r.data)+(r.status==='GUARDADO'?' · '+(r.dep?r.dep+' · ':'')+r.end:' · a guardar')+(r.desc?' · '+r.desc:''))),
+      h('button',{class:'btn sm',onclick:function(){F.fix={id:x.id,mat:r.mat,qtd:String(r.qtd).replace('.',','),nota:r.nota||'',por:r.por||'',data:normData(r.data)||today(),end:r.end||'',dep:r.dep||''};go('rec');window.scrollTo(0,0);}},'Corrigir'));})));
+  v.append(rc);
 }
 async function guardarEm(x){
   var id=endKey(x.dep||'',x.end);
@@ -13073,6 +13081,85 @@ async function salvarRec(guardar){
     if(old)await put('rec',R.pendId,rec);else await addRec(rec);
     toast(guardar?'✔ Recebido e guardado em '+(rec.dep?rec.dep+' · ':'')+rec.end:'✔ Recebimento registrado (a guardar)','ok');
     F.rec={mat:'',qtd:'',nota:'',por:'',data:R.data,end:'',pendId:''};F.recRaw='';
+  }catch(err){toast(errMsg(err),'bad');}
+  F.busy=false;go('rec');
+}
+function cardFix(){
+  var X=F.fix,old=S.rec[X.id];
+  if(!old){F.fix=null;return null;}
+  var gu=old.status==='GUARDADO';
+  function fld(label,name,attrs){
+    var i=h('input',Object.assign({type:'text',autocomplete:'off'},attrs||{}));i.value=X[name]||'';
+    i.addEventListener('input',function(){X[name]=i.value;});
+    return h('div',{class:'grow'},h('label',{class:'f'},label),i);
+  }
+  var c=h('div',{class:'card',style:'border:2px solid var(--pri,#0a7)'},h('h2',null,'Corrigir recebimento'),
+    h('div',{class:'muted',style:'margin-bottom:8px'},'Antes: '+old.mat+' · '+fmt(old.qtd)+(gu?' · '+(old.dep?old.dep+' · ':'')+old.end:' · a guardar')),
+    fld('Material','mat',{autocapitalize:'characters'}),
+    h('div',{class:'row',style:'margin-top:8px'},fld('Quantidade','qtd',{inputmode:'decimal'}),fld('Nota fiscal','nota')),
+    h('div',{class:'row',style:'margin-top:8px'},fld('Recebido por','por'),fld('Data','data',{type:'date'})));
+  if(gu){
+    var dps=depList(),dSel=h('select',{style:'max-width:130px'});
+    dps.forEach(function(d){dSel.append(h('option',{value:d},'Dep. '+d));});
+    dSel.value=X.dep||dps[0]||'';
+    dSel.addEventListener('change',function(){X.dep=dSel.value;});
+    var eIn=h('input',{type:'text',placeholder:'Endereço (ex.: A-05-03)',autocapitalize:'characters',autocomplete:'off'});
+    eIn.value=X.end||'';eIn.addEventListener('input',function(){X.end=eIn.value;});
+    c.append(h('div',{class:'muted',style:'margin:10px 0 4px'},'Onde ficou guardado:'));
+    c.append(h('div',{class:'row'},dps.length?dSel:null,h('div',{class:'grow'},eIn)));
+  }
+  c.append(h('div',{style:'height:12px'}));
+  c.append(h('button',{class:'btn primary big',disabled:F.busy,onclick:salvarFix},F.busy?'Salvando…':'Salvar correção'));
+  c.append(h('button',{class:'btn big ghost',style:'margin-top:8px',disabled:F.busy,onclick:function(){F.fix=null;go('rec');}},'Cancelar'));
+  return c;
+}
+async function salvarFix(){
+  var X=F.fix,old=S.rec[X.id];
+  if(!old)return;
+  var code=String(X.mat||'').trim(),q=num(X.qtd),gu=old.status==='GUARDADO';
+  if(!code){toast('Informe o material.','bad');return;}
+  if(isNaN(q)||q<=0){toast('Informe a quantidade.','bad');return;}
+  if(!X.data){toast('Informe a data.','bad');return;}
+  var cod='',dp='';
+  if(gu){
+    cod=stdEnd(X.end);dp=X.dep||'';
+    if(!cod){toast('Informe o endereço.','bad');return;}
+    if(cod.length>MAX_END){toast('No SAP o endereço aceita no máximo '+MAX_END+' caracteres.','bad');return;}
+  }
+  F.busy=true;go('rec');
+  var avisos=[];
+  try{
+    await lookupMat(code);
+    var mid=key(code),m=S.mat[mid];
+    if(!m){m={codigo:code,desc:'',un:'UN'};await put('mat',mid,m);}
+    var rec=Object.assign({},old,{data:normData(X.data),mes:normData(X.data).slice(0,7),mat:m.codigo,desc:m.desc||'',qtd:q,nota:String(X.nota||'').trim(),por:String(X.por||'').trim()||old.por});
+    if(gu){
+      var oMid=key(old.mat),oQ=Number(old.qtd)||0,oEndId=endKey(old.dep||'',old.end),nEndId=endKey(dp,cod);
+      if(oMid!==mid||oEndId!==nEndId||oQ!==q){
+        // 1) tira do lugar antigo (só o que realmente estiver lá)
+        var have=(S.est[estId(oEndId,oMid)]||{}).qtd||0,take=Math.min(have,oQ);
+        if(take>0){
+          var sobra=await changeStock(oEndId,oMid,'out',take);
+          await addMov({ts:Date.now(),tipo:'SAIDA',mat:old.mat,desc:old.desc||'',end:old.end,dep:old.dep||'',qtd:take,saldo:sobra,usuario:user,nota:'correção'});
+        }
+        if(take<oQ)avisos.push('No endereço antigo havia menos do que o recebido; confira o saldo.');
+        // 2) SAP: a linha errada que ainda não foi enviada é apagada
+        var oSapId=oMid+'~'+(key(old.dep)||'_'),nSapId=mid+'~'+(key(dp)||'_'),row=S.sap[oSapId];
+        if(row&&oSapId!==nSapId&&String(row.end)===String(old.end)){
+          if(row.sap==='OK')avisos.push('O SAP já tinha sido alterado: material '+old.mat+' ficou com o endereço '+row.end+'. Volte o endereço antigo dele na MM02.');
+          else await del('sap',oSapId);
+        }
+        // 3) coloca no lugar certo
+        if(!S.end[nEndId])await put('end',nEndId,{codigo:cod,desc:'',dep:dp});
+        var novo=await changeStock(nEndId,mid,'in',q);
+        await registrarEnderecoSap(m.codigo,{codigo:cod,dep:dp});
+        await addMov({ts:Date.now(),tipo:'ENTRADA',mat:m.codigo,desc:m.desc||'',end:cod,dep:dp,qtd:q,saldo:novo,usuario:user,nota:'correção'});
+        rec.end=cod;rec.dep=dp;
+      }
+    }
+    await put('rec',X.id,rec);
+    toast(avisos.length?avisos.join(' '):'✔ Correção salva','ok');
+    F.fix=null;
   }catch(err){toast(errMsg(err),'bad');}
   F.busy=false;go('rec');
 }
